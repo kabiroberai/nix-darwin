@@ -180,21 +180,36 @@ if [ "$action" != build ]; then
   fi
 fi
 
+runAsUser() {
+  if [[ $(id -u) -eq 0 ]]; then
+    if [[ -n $SUDO_USER ]]; then
+      sudo --user="$SUDO_USER" --set-home -- "${@:2}"
+    else
+      printf >&2 \
+        '%s: $SUDO_USER not set, can’t run %s\n' \
+        "$0" "$1"
+      exit 1
+    fi
+  else
+    "${@:2}"
+  fi
+}
+
 if [ "$action" = edit ]; then
   if [ -z "$flake" ]; then
-    darwinConfig=$(nix-instantiate "${extraBuildFlags[@]}" --find-file darwin-config)
-    exec "${EDITOR:-vi}" "$darwinConfig"
+    darwinConfig=$(runAsUser nix-instantiate "${extraBuildFlags[@]}" --find-file darwin-config)
+    exec runAsUser "${EDITOR:-vi}" "$darwinConfig"
   else
-    exec nix "${flakeFlags[@]}" edit "${extraLockFlags[@]}" -- "$flake#$flakeAttr"
+    exec runAsUser nix "${flakeFlags[@]}" edit "${extraLockFlags[@]}" -- "$flake#$flakeAttr"
   fi
 fi
 
 if [ "$action" = switch ] || [ "$action" = build ] || [ "$action" = check ] || [ "$action" = changelog ]; then
   echo "building the system configuration..." >&2
   if [ -z "$flake" ]; then
-    systemConfig="$(nix-build '<darwin>' "${extraBuildFlags[@]}" -A system)"
+    systemConfig="$(runAsUser nix-build '<darwin>' "${extraBuildFlags[@]}" -A system)"
   else
-    systemConfig=$(nix "${flakeFlags[@]}" build --json \
+    systemConfig=$(runAsUser "nix build" nix "${flakeFlags[@]}" build --json \
       "${extraBuildFlags[@]}" "${extraLockFlags[@]}" \
       -- "$flake#$flakeAttr.system" \
       | jq -r '.[0].outputs.out')
@@ -227,14 +242,7 @@ else
 fi
 
 runActivateUser() {
-  if [[ -n $SUDO_USER ]]; then
-    sudo --user="$SUDO_USER" --set-home -- "$systemConfig/activate-user"
-  else
-    printf >&2 \
-      '%s: $SUDO_USER not set, can’t run legacy `activate-user` script\n' \
-      "$0"
-    exit 1
-  fi
+  runAsUser "legacy `activate-user` script" "$systemConfig/activate-user"
 }
 
 if [ "$action" = switch ]; then
